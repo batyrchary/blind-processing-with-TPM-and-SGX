@@ -53,6 +53,14 @@ using namespace std;
 #include "msgio.h"
 #include "logfile.h"
 #include "quote_size.h"
+#include<iostream>
+
+#include <io.h>   // For access().
+#include <sys/types.h>  // For stat().
+#include <sys/stat.h>   // For stat().
+#include <string>
+using namespace std;
+
 
 
 #define MAX_LEN 80
@@ -280,7 +288,7 @@ void MeasureApp(Tpm2 tpm)
 }
 
 
-void Signing(Tpm2 tpm, TPM_HANDLE keyhandle, char* nonce)
+void Signing(Tpm2 tpm, TPM_HANDLE keyhandle, char* nonce,  char* smessage)
 {
 	vector<BYTE> NullVec;
 	ByteVec userAuth = ByteVec{ 1, 2, 3, 4 };
@@ -288,10 +296,7 @@ void Signing(Tpm2 tpm, TPM_HANDLE keyhandle, char* nonce)
 	char tobeSigned[10];
 	strcpy(tobeSigned, nonce);
 
-	//printf("Enter nonce:");
-	//scanf("%s", tobeSigned);
 	printf("will be signed:%s\n", tobeSigned);
-
 
 	TPM_HANDLE& signKey = keyhandle;
 	signKey.SetAuth(userAuth);
@@ -299,6 +304,18 @@ void Signing(Tpm2 tpm, TPM_HANDLE keyhandle, char* nonce)
 	auto sig = tpm.Sign(signKey, dataToSign.digest, TPMS_NULL_SIG_SCHEME(), TPMT_TK_HASHCHECK::NullTicket());
 	cout << "Data to be signed:" << dataToSign.digest << endl;
 	cout << "Signature:" << endl << sig.ToString(false) << endl;
+
+	
+
+//	cout << "size=" << sizeof(sig.Serialize(SerializationType::Text)) << endl;
+	
+	string sserialized = sig.Serialize(SerializationType::Text);
+	//printf("size=%d\n", s.size());
+//	printf("length=%d\n", s.length());
+	cout << "sig=" << sserialized << endl;
+
+//	memcpy(smessage, &s, 1000);
+	smessage = (char*) sserialized.c_str();
 
 
 	// This command uses loaded keys to validate a signature on a message 
@@ -311,7 +328,7 @@ void Signing(Tpm2 tpm, TPM_HANDLE keyhandle, char* nonce)
 	{
 		cout << "Signature verification succeeded" << endl;
 	}
-
+	
 	return;
 }
 
@@ -420,9 +437,10 @@ int main(int argc, char *argv[])
 
 
 									//Test TPM functionality//
+	
+	getRandomBytes(tpm);
+	
 	/*
-	//	getRandomBytes(tpm);
-
 	TPM_HANDLE *primaryKey = NULL;
 	TPM_HANDLE *signingKey = NULL;
 
@@ -460,7 +478,7 @@ int main(int argc, char *argv[])
 			if (signingKey == NULL) { cout << "Create primary AIK first" << endl; }
 			else
 			{
-				Signing(tpm, *signingKey);
+//				Signing(tpm, *signingKey);
 				cout << "signing and verification is done" << endl;
 			}
 		}
@@ -819,8 +837,9 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 		
 		if (rmessage.command == 1)//"Attesting ID"
 		{
-			printf("--------------- Attesting ID ---------------\n");
 
+			printf("--------------- Attesting ID ---------------\n");
+			/*
 			printf("Checking EK\n");
 			if (primaryKey == NULL)
 			{
@@ -841,7 +860,45 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 			{
 				cout << "AIK exists with handle:\t" << signingKey->handle << endl;
 			}
-			Signing(tpm, *signingKey, rmessage.Nonce);
+			
+			Signing(tpm, *signingKey, rmessage.Nonce, smessage.result);
+//			cout << "sig=" << smessage.result << endl;
+			*/
+		
+
+		//	system("start powershell.exe Set-ExecutionPolicy RemoteSigned \n");
+		//	system("start powershell.exe C:\\Users\\admin\\Desktop\\pscript.ps1");
+		//	system("cls");
+		
+
+			ifstream::pos_type size;
+			char * memblock = NULL;
+
+			ifstream file("./ek.cer", ios::in | ios::binary | ios::ate);
+
+			if (file.is_open())
+			{				
+				size = file.tellg();
+				
+				memblock = new char[size];
+				file.seekg(0, ios::beg);
+				file.read(memblock, size);
+				file.close();
+			}
+			//printf("%s\n", memblock);
+			cout << "size1=" << (int)size << endl;
+			cout << "size2=" << sizeof(*memblock)<< endl;
+
+
+			for (int i = 0; i < 10; i++)//copyNonce
+			{
+				smessage.Rest.push_back(rmessage.Rest[i]);
+			}
+
+			for (int i = 0; i < size; i++)
+			{
+				smessage.Rest.push_back(memblock[i]);
+			}
 
 			msgio->SendStruct(&smessage);
 			msgio->printMessage(&smessage, 1);
@@ -857,16 +914,23 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 		}
 		else if (rmessage.command == 4)//"done"
 		{
+			cout << "inside command4" << endl;
 			break;
+			cout << "inside command4 after break" << endl;
 		}
 		else
 		{
 		}
 		
+		cout << "command4 before continue" << endl;
 		
+
+
 		
+
+
+		/*
 		
-		continue;
 
 		
 		char* received = (char *)malloc(512);
@@ -891,37 +955,7 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 
 		if (strcmp(receivedU, "AttestID") == 0)
 		{
-			/*
-			printf("--------------- Attesting ID ---------------\n");
-
-			printf("Checking EK\n");
-			if (primaryKey == NULL)
-			{
-				printf("EK doesnt exist, creating EK\n");
-				primaryKey = &(MakeEndorsementKey(tpm));
-			}
-			else
-			{
-				cout << "EK exists with handle:\t" << primaryKey->handle << endl;
-			}
-			printf("Checking AIK\n");
-			if (signingKey == NULL)
-			{
-				printf("AIK doesnt exist, creating AIK under EK\n");
-				signingKey = &(MakeChildSigningKey(*primaryKey, true, tpm));
-			}
-			else
-			{
-				cout << "AIK exists with handle:\t" << signingKey->handle << endl;
-			}
-			Signing(tpm, *signingKey);
-
-			*/
-			sent = "result AttestID";
-
-			strcpy(sentU, sent);
-			msgio->mySend(sent, NULL);
-			//msgio->send(sent, NULL);
+		
 		}
 		else if (strcmp(receivedU, "AttestEnclave") == 0)
 		{
@@ -941,28 +975,6 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 		{
 			printf("--------------- Generating Quote (i.e. Attesting Platform And App State) ---------------\n");
 
-			/*
-			printf("Checking EK\n");
-			if (primaryKey == NULL)
-			{
-				printf("EK doesnt exist, creating EK\n");
-				primaryKey = &(MakeEndorsementKey(tpm));
-			}
-			else
-			{
-				cout << "EK exists with handle:\t" << primaryKey->handle << endl;
-			}
-			printf("Checking AIK\n");
-			if (signingKey == NULL)
-			{
-				printf("AIK doesnt exist, creating AIK under EK\n");
-				signingKey = &(MakeChildSigningKey(*primaryKey, true, tpm));
-			}
-			else
-			{
-				cout << "AIK exists with handle:\t" << signingKey->handle << endl;
-			}
-			*/
 			
 			//MeasureApp(tpm);
 			//GenerateQuote_PCR(tpm);
@@ -990,6 +1002,11 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 			//msgio->mySend(sent, NULL);
 			msgio->send(sent, NULL);
 		}
+
+
+		*/
+
+
 	}
 
 

@@ -34,6 +34,9 @@
 #include "logfile.h"
 #include "settings.h"
 
+#include <iostream>
+#include <fstream>
+
 using namespace json;
 using namespace std;
 
@@ -641,8 +644,9 @@ int main(int argc, char *argv[])
 			printf("Command:"); //sth else by default
 			scanf("%d", &command);
 
-			Nonce = CryptoServices::GetRand(9); //gets 10bytes
+			Nonce = CryptoServices::GetRand(10); //gets 10bytes
 			//std::vector<BYTE> Nonce = tpm.GetRandom(20);
+;
 
 			if (command == 3)
 			{
@@ -653,12 +657,22 @@ int main(int argc, char *argv[])
 			smessage.command = command;
 			smessage.startPCR = sPCR;
 			smessage.endPCR = ePCR;
-			std::copy(Nonce.begin(), Nonce.end(), smessage.Nonce);
 
+			smessage.Rest.resize(10);
+
+			std::copy(Nonce.begin(), Nonce.end(), smessage.Rest.begin());
 
 			string s = "geeksforgeeks";
-			strcpy(smessage.result, s.c_str());
+			
+			for (int i = 0; i < s.length(); i++)
+			{
+				smessage.Rest.push_back(s[i]);
+			}
 
+			cout << endl << "Nonce=>" << endl;
+			for (auto val : Nonce) printf("\\x%.2x", val);
+			cout << endl;
+	
 			msgio->SendStruct(&smessage);
 			msgio->printMessage(&smessage, 1);
 
@@ -666,6 +680,28 @@ int main(int argc, char *argv[])
 			{
 				msgio->ReadStruct(&rmessage);
 				msgio->printMessage(&rmessage, 0);
+
+
+				int receivedsize = rmessage.Rest.size();
+				int certSize = receivedsize - 10;
+				
+				char * memblock = (char*)malloc(certSize);
+
+				for (int i = 10; i < receivedsize;i++)
+				{
+					memblock[i - 10] = rmessage.Rest[i];
+				}
+				
+
+				
+				ofstream myfile;
+				myfile.open("./ekReceived.cer", ios::out | ios::binary | ios::app );
+
+				if (myfile.is_open())
+				{
+					myfile.write(memblock, certSize);
+					myfile.close();
+				}
 			}
 			else if (command == 2)//"AttestEnclave"
 			{

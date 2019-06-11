@@ -1,5 +1,3 @@
-
-
 #ifdef _WIN32
 # ifndef WIN32_LEAN_AND_MEAN
 #  define WIN32_LEAN_AND_MEAN
@@ -280,10 +278,7 @@ int MsgIO::myRead(char* recvbuf, int *sz)
 
 	int iResult = recv(s, recvbuf, recvbuflen, NULL);
 
-	//printf("iResult=%d\n", iResult);
 	*sz = iResult;
-	//printf("myRead=%s\n", recvbuf);
-
 	return 0;
 }
 
@@ -294,7 +289,6 @@ int MsgIO::mySend(char *src, size_t *sz)
 	size_t  len = wbuffer.length();
 
 	ssize_t bsent = ::send(s, src, (int)len, 0);
-	//printf("mySend=%s\n", wbuffer.c_str());
 	wbuffer.erase(0, bsent);
 
 	return 0;
@@ -305,26 +299,35 @@ int MsgIO::mySend(char *src, size_t *sz)
 
 int MsgIO::ReadStruct(message *rec)
 {
-	int size = 82;
-	char* buffer=(char *)malloc(512);
+	int size;  //no need to initialize
+	recv(s, (char *)&size, sizeof(int), 0);
+
+	//cout << std::dec;
+	//cout << "sizeOfMesssageReceived1=" << size << endl;
+
+	int tobeReceived = size;
+	char* buffer = (char *)malloc(tobeReceived);
 
 	while (size > 0)
 	{
-//		int iResult = recv(s, (char*)rec + (82 - size), size, NULL);
-		int iResult = recv(s, &buffer[82 - size], size, NULL);
-
+		int iResult = recv(s, (char*)&buffer[tobeReceived - size], size, NULL);
 		size = size - iResult;
 	}
 
-	message *recc = reinterpret_cast<message*>(buffer);
-	*rec = *recc;
+	//unsigned char* charPtr = (unsigned char*)buffer;
+	//cout << "data=>" << endl;
+	//for (int i = 0; i < tobeReceived; i++)
+	//	printf("%02x ", charPtr[i]);
+
+	//cout << endl;
+
+	deserialize(buffer, rec, tobeReceived);
 
 	return 0;
 }
 
 void MsgIO::printMessage(message *dest, int i_o)
 {
-	
 	if (i_o == 1)
 	{
 		cout << "-----------smessage------------" << endl;
@@ -335,22 +338,73 @@ void MsgIO::printMessage(message *dest, int i_o)
 	}
 
 	printf("command=%d\n", dest->command);
-	printf("nonce=%s\n", dest->Nonce);
-	printf("result=%s\n", dest->result);
 	printf("range=%d-%d\n", dest->startPCR, dest->endPCR);
+
+	cout << endl << "RestInStruct=>" << endl;
+	for (auto val : dest->Rest) printf("\\x%.2x", val);
+	cout << endl;
 }
 
 int MsgIO::SendStruct(message *sen)
 {
-	int size = 82;
+	int totalSize = 3 * sizeof(int) + (sen->Rest.size()) * sizeof(sen->Rest[0]);
+	char *data = (char*) malloc(totalSize);
+	serialize(sen, data);
+	
+	int size = totalSize;
+	int sizeUpper = totalSize;
+	int bsent = ::send(s, (char *)&sizeUpper, sizeof(int), 0);
 	while (size > 0)
 	{
-		int bsent = ::send(s, ((char*)sen)+(82-size), size, 0);
+		bsent = ::send(s, ((char*)data) + (sizeUpper - size), size, 0);
 		size = size - bsent;
 	}
+	
+	//unsigned char* charPtr = (unsigned char*)data;
+	//cout << "data=>" << endl;
+	//for (int i = 0; i < totalSize; i++)
+	//	printf("%02x ", charPtr[i]);
+	//cout << endl;
+
 	return 0;
 }
 
+
+void MsgIO::serialize(message* msgPacket, char *data)
+{
+	int *q = (int*)data;
+	*q = msgPacket->command;       q++;
+	*q = msgPacket->startPCR;   q++;
+	*q = msgPacket->endPCR;     q++;
+
+	BYTE *p = (BYTE*)q;
+	int i = 0;
+	while (i < msgPacket->Rest.size())
+	{
+		*p = msgPacket->Rest[i];
+		p++;
+		i++;
+	}
+}
+
+void MsgIO::deserialize(char *data, message* msgPacket, int size)
+{
+	int *q = (int*)data;
+	msgPacket->command = *q;       q++;
+	msgPacket->startPCR = *q;   q++;
+	msgPacket->endPCR = *q;     q++;
+
+	int leftSize = size - 3 * sizeof(int);
+
+	BYTE *p = (BYTE*)q;
+	int i = 0;
+	while (i < leftSize)
+	{
+		msgPacket->Rest.push_back(*p);
+		p++;
+		i++;
+	}
+}
 
 
 
@@ -377,7 +431,7 @@ int MsgIO::read(void **dest, size_t *sz)
 	while (repeat) {
 	again:
 		bread = recv(s, lbuffer, sizeof(lbuffer), 0);
-		printf("passed recv");
+		
 		if (bread == -1) {
 			if (errno == EINTR) goto again;
 			perror("recv");

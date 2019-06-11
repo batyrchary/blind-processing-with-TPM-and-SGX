@@ -29,12 +29,12 @@ typedef int SOCKET;
 #endif
 
 
-struct message {
+struct message 
+{
 	int command = 0;
 	int startPCR = 0;
 	int endPCR = 0;
-	char Nonce[10] = {'\0'}; //10byte
-	char result[60] = { '\0' };
+	vector<BYTE> Rest = vector<BYTE>();
 };
 
 
@@ -65,6 +65,8 @@ public:
 
 	void printMessage(message *dest, int i_o);
 
+	void serialize(message* msgPacket, char *data);
+	void deserialize(char *data, message* msgPacket, int size);
 };
 
 #ifdef __cplusplus
