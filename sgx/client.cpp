@@ -213,35 +213,26 @@ TPM_HANDLE MakeChildSigningKey(TPM_HANDLE parentHandle, bool restricted, Tpm2 tp
 	return signKey;
 }
 
-void MeasureApp(Tpm2 tpm)
+void MeasureApp(Tpm2 tpm, int startPCR, int endPCR)
 {
 	ifstream::pos_type size;
 	char * memblock = NULL;
 
-	//ifstream file("C:/Users/admin/Desktop/join/sgx/vs/x64/Debug/TSS.CPP Samples.exe", ios::in | ios::binary | ios::ate);
 	ifstream file("./client.exe", ios::in | ios::binary | ios::ate);
 
-	int PCRbank = 13;
-
-	//printf("PCRbank:");
-	//scanf("%d", &PCRbank);
+	int PCRbank = startPCR;
 
 	if (file.is_open())
 	{
 		size = file.tellg();
-	//	cout << "size=" << size << endl;
 		memblock = new char[size];
 		file.seekg(0, ios::beg);
 		file.read(memblock, size);
 		file.close();
-
-//		cout << "the complete file content is in memory" << endl;
-		//delete[] memblock;
 	}
 
 	vector<BYTE> NullVec;
 	vector<TPM_ALG_ID> hashAlgs{ TPM_ALG_ID::SHA1, TPM_ALG_ID::SHA256 };
-
 	ByteVec data(memblock, memblock + (int)size);
 
 	/*
@@ -384,12 +375,14 @@ TPM_HANDLE MakeChildSigningKeyForQuote(Tpm2 tpm, TPM_HANDLE parentHandle, bool r
 }
 
 
-void GenerateQuote_PCR(Tpm2 tpm)
+QuoteResponse GenerateQuote_PCR(Tpm2 tpm, int startPCR, int endPCR, ByteVec Nonce)
 {
-	int PCRbank = 13;
 
-	//printf("PCRbank:");
-	//scanf("%d", &PCRbank);
+//	cout << endl << "Nonce=>" << endl;
+//	for (auto val : Nonce) printf("\\x%.2x", val);
+//	cout << endl;
+
+	int PCRbank = startPCR;
 
 	vector<BYTE> NullVec;
 	TPM_HANDLE primaryKey = MakeStoragePrimary(tpm);
@@ -399,9 +392,14 @@ void GenerateQuote_PCR(Tpm2 tpm)
 	auto pcrsToQuote = TPMS_PCR_SELECTION::GetSelectionArray(TPM_ALG_ID::SHA1, PCRbank);
 
 	PCR_ReadResponse pcrVals = tpm.PCR_Read(pcrsToQuote);
-	ByteVec Nonce = CryptoServices::GetRand(16);
+//	ByteVec Nonce = CryptoServices::GetRand(16);
 	QuoteResponse quote = tpm.Quote(signingKey, Nonce, TPMS_NULL_SIG_SCHEME(), pcrsToQuote);
 
+	cout << ">> PCR Quoting done" << endl;
+	return quote;
+
+
+	/*
 
 	// Need to cast to the proper attestion type to validate
 	TPMS_ATTEST qAttest = quote.quoted;
@@ -414,6 +412,8 @@ void GenerateQuote_PCR(Tpm2 tpm)
 	bool sigOk = pubKey.outPublic.ValidateQuote(pcrVals, Nonce, quote);
 
 	if (sigOk) { cout << "The quote was verified correctly" << endl; }
+
+	*/
 }
 
 
@@ -434,7 +434,6 @@ int main(int argc, char *argv[])
 	device.PowerOn();
 	tpm.Startup(TPM_SU::CLEAR);
 	/////////////////////////////////////////////////////////////////////////////////////////////////
-
 
 									//Test TPM functionality//
 	
@@ -808,7 +807,6 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 	TPM_HANDLE *primaryKey = NULL;
 	TPM_HANDLE *signingKey = NULL;
 
-
 	if (config->server == NULL)
 	{
 		msgio = new MsgIO();
@@ -833,7 +831,6 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 			
 		msgio->ReadStruct(&rmessage);
 		msgio->printMessage(&rmessage, 0);
-
 		
 		if (rmessage.command == 1)//"Attesting ID"
 		{
@@ -905,24 +902,65 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 		}
 		else if (rmessage.command == 2)//"AttestEnclave"
 		{
-			printf("Attesting Enclave\n");
+			printf("-------------- - Attesting Enclave---------------\n");
 
 			do_attestation(eid, config, msgio);
 		}
-		else if (rmessage.command == 3)//"AttestEnclave"
+		else if (rmessage.command == 3)
 		{
+			printf("--------------- Generating Quote (i.e. Attesting Platform And App State) ---------------\n");
+
+			MeasureApp(tpm, rmessage.startPCR, rmessage.endPCR);
+	
+			
+			ByteVec NonceExtracted = ByteVec();
+
+			for (int n = 0; n < 10; n++)
+			{
+				NonceExtracted.push_back(rmessage.Rest[n]);
+				smessage.Rest.push_back(rmessage.Rest[n]);
+			}
+
+
+			QuoteResponse quote=GenerateQuote_PCR(tpm, rmessage.startPCR, rmessage.endPCR, NonceExtracted);
+			
+			TPMS_ATTEST qAttest = quote.quoted;
+			TPMS_QUOTE_INFO *qInfo = dynamic_cast<TPMS_QUOTE_INFO *> (qAttest.attested);
+			cout << "Quoted PCR: " << qInfo->pcrSelect[0].ToString() << endl;
+			cout << "PCR-value digest: " << qInfo->pcrDigest << endl;
+
+			
+			string qserialized=quote.Serialize(SerializationType::JSON);
+
+			cout << "quote as JSON=>" << endl;
+			cout << qserialized << endl;
+			printf("quote as JSON length=%d\n", qserialized.length());
+
+
+			//cout << "deserialization:" << endl;
+			//QuoteResponse quoteDeserialized=QuoteResponse();
+			//cout << "deserialization line 1 passed:" << endl;
+			
+			//quoteDeserialized.Deserialize(SerializationType::JSON, qserialized);
+
+			for (int qs = 0; qs < qserialized.length(); qs++)
+			{
+				smessage.Rest.push_back(qserialized[qs]);
+			}
+			
+			msgio->SendStruct(&smessage);
+			//msgio->printMessage(&smessage, 1);
+			
 		}
 		else if (rmessage.command == 4)//"done"
 		{
-			cout << "inside command4" << endl;
+			cout << "-----------Breaking-----------" << endl;
 			break;
-			cout << "inside command4 after break" << endl;
 		}
 		else
 		{
 		}
-		
-		cout << "command4 before continue" << endl;
+
 		
 
 

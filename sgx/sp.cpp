@@ -691,9 +691,7 @@ int main(int argc, char *argv[])
 				{
 					memblock[i - 10] = rmessage.Rest[i];
 				}
-				
-
-				
+			
 				ofstream myfile;
 				myfile.open("./ekReceived.cer", ios::out | ios::binary | ios::app );
 
@@ -742,6 +740,31 @@ int main(int argc, char *argv[])
 			}
 			else if (command == 3) //Attesting Platform And App State
 			{
+				msgio->ReadStruct(&rmessage);
+			//	msgio->printMessage(&rmessage, 0);
+
+	
+				int receivedsize = rmessage.Rest.size();
+				int quoteSize = receivedsize - 10;
+
+				char * memblock = (char*)malloc(quoteSize+1);
+
+				for (int i = 10; i < receivedsize;i++)
+				{
+					memblock[i - 10] = rmessage.Rest[i];
+					memblock[i - 9] = '\0';
+				}
+
+				string qserialized = std::string(memblock);
+
+				cout << "deserialization=>" << endl;
+				QuoteResponse quoteDeserialized=QuoteResponse();
+			
+				quoteDeserialized.Deserialize(SerializationType::JSON, qserialized);
+		
+				cout << "quote as JSON=>" << endl;
+				cout << qserialized << endl;
+				printf("quote as JSON length=%d\n", qserialized.length());
 
 			}
 			else if (command == 4)
