@@ -633,46 +633,50 @@ int main(int argc, char *argv[])
 			printf("1 -> Attest Identity\t");
 			printf("2 -> Attest Enclave\t");
 			printf("3 -> Attesting Platform And App State\n");
-			printf("4 -> done\n");
+			printf("4 -> done\t");
+			printf("5 -> Multiplication Operation\n");
 
 			message smessage = message();
 			message rmessage = message();
-
 			int sPCR=0, ePCR=0,command;
 			vector<BYTE> Nonce;
 
-			printf("Command:"); //sth else by default
-			scanf("%d", &command);
-
 			Nonce = CryptoServices::GetRand(10); //gets 10bytes
 			//std::vector<BYTE> Nonce = tpm.GetRandom(20);
-;
+			smessage.Rest.resize(10);
+			std::copy(Nonce.begin(), Nonce.end(), smessage.Rest.begin());
+			cout << endl << "Nonce=>" << endl;
+			for (auto val : Nonce) printf("\\x%.2x", val);
+			cout << endl;
+
+
+			printf("Command:"); //sth else by default
+			scanf("%d", &command);
 
 			if (command == 3)
 			{
 				printf("provide range[0-23] of PCRs: example for PCR0: 0,0\t for PCR[1-3]: 1,3\n range:");
 				scanf("%d,%d", &sPCR, &ePCR);
 			}
+			if (command == 5)
+			{
+				int numberToBeSquared = 0;
+				printf("provide number to be squared:");
+				scanf("%d", &numberToBeSquared);
+
+				BYTE arrayOfByte[sizeof(int)];
+				memcpy(arrayOfByte, &numberToBeSquared, sizeof(numberToBeSquared));
+
+				for (int in = 0; in < sizeof(int); in++)
+				{
+					smessage.Rest.push_back(arrayOfByte[in]);
+				}
+			}
 
 			smessage.command = command;
 			smessage.startPCR = sPCR;
 			smessage.endPCR = ePCR;
 
-			smessage.Rest.resize(10);
-
-			std::copy(Nonce.begin(), Nonce.end(), smessage.Rest.begin());
-
-			string s = "geeksforgeeks";
-			
-			for (int i = 0; i < s.length(); i++)
-			{
-				smessage.Rest.push_back(s[i]);
-			}
-
-			cout << endl << "Nonce=>" << endl;
-			for (auto val : Nonce) printf("\\x%.2x", val);
-			cout << endl;
-	
 			msgio->SendStruct(&smessage);
 			msgio->printMessage(&smessage, 1);
 
@@ -681,9 +685,11 @@ int main(int argc, char *argv[])
 				msgio->ReadStruct(&rmessage);
 				msgio->printMessage(&rmessage, 0);
 
-
 				int receivedsize = rmessage.Rest.size();
 				int certSize = receivedsize - 10;
+
+			//	printf("restSize=%d\n", receivedsize);	
+			//	printf("certSize=%d\n", certSize );
 				
 				char * memblock = (char*)malloc(certSize);
 
@@ -692,13 +698,29 @@ int main(int argc, char *argv[])
 					memblock[i - 10] = rmessage.Rest[i];
 				}
 			
+				//system("del ./../../../../certificates/ekReceived.cer");
+				//system("del ./../../../../certificates/ekReceived_crt.crt");
+
 				ofstream myfile;
-				myfile.open("./ekReceived.cer", ios::out | ios::binary | ios::app );
+				myfile.open("./../../../../certificates/ekReceived.cer", ios::out | ios::binary | ios::app );
 
 				if (myfile.is_open())
 				{
 					myfile.write(memblock, certSize);
 					myfile.close();
+				}
+			
+	system("openssl x509 -inform DER -in ./../../../../certificates/ekReceived.cer -out ./../../../../certificates/ekReceived_crt.crt");
+				
+	system("openssl verify -verbose -CAfile ./../../../../certificates/TPMRootCA_crt.crt ./../../../../certificates/ekReceived_crt.crt >system_call_result.txt");
+				
+				vector<string> results;
+				ifstream in("system_call_result.txt");
+				string line;
+				while (getline(in, line))
+				{
+					cout << line << endl;
+					results.push_back(line); // Add the line to the end
 				}
 			}
 			else if (command == 2)//"AttestEnclave"
@@ -743,7 +765,6 @@ int main(int argc, char *argv[])
 				msgio->ReadStruct(&rmessage);
 			//	msgio->printMessage(&rmessage, 0);
 
-	
 				int receivedsize = rmessage.Rest.size();
 				int quoteSize = receivedsize - 10;
 
@@ -757,215 +778,58 @@ int main(int argc, char *argv[])
 
 				string qserialized = std::string(memblock);
 
-				cout << "deserialization=>" << endl;
+				//cout << "deserialization=>" << endl;
 				QuoteResponse quoteDeserialized=QuoteResponse();
 			
 				quoteDeserialized.Deserialize(SerializationType::JSON, qserialized);
 		
-				cout << "quote as JSON=>" << endl;
+				//cout << "quote as JSON=>" << endl;
 				cout << qserialized << endl;
-				printf("quote as JSON length=%d\n", qserialized.length());
 
+			
+				// Need to cast to the proper attestion type to validate
+				TPMS_ATTEST qAttest = quoteDeserialized.quoted;
+				TPMS_QUOTE_INFO *qInfo = dynamic_cast<TPMS_QUOTE_INFO *> (qAttest.attested);
+				cout << "Quoted PCR: " << qInfo->pcrSelect[0].ToString() << endl;
+				cout << "PCR-value digest: " << qInfo->pcrDigest << endl;
 			}
 			else if (command == 4)
 			{
 				break;
 			}
+			else if (command == 5)
+			{
+				msgio->ReadStruct(&rmessage);
+				msgio->printMessage(&rmessage, 0);
+		
+				BYTE arrayOfByte[sizeof(int)];
+				for (int i = 10; i < 10 + sizeof(int); i++)
+				{
+					arrayOfByte[i - 10] = rmessage.Rest[i];
+				}
+				int numberIn;
+				memcpy(&numberIn, &arrayOfByte, sizeof(numberIn));
+
+				printf("number squared=%d\n", numberIn);
+			}
 			else
 			{
+
 			}
-
-
-			
-
-			continue;
-
-
-
-			/*
-			char* received = (char *)malloc(512);
-			char receivedU[512] = { '\0' };
-			int length = 0;
-
-
-
-			printf("---------------------------\n");
-			printf("\n\nOptions\n");
-			printf("1 -> Attest Identity\t");
-			printf("2 -> Attest Enclave\t");
-			printf("3 -> Attesting Platform And App State\n");
-			printf("4 -> done\n");
-
-
-			char command[30] = { '\0' };
-			
-			int commandInt=4;
-			printf("Command:");
-			scanf("%d", &commandInt);
-			
-			string s = "other";
-
-			if (commandInt == 1)
-			{
-				s = "AttestID";
-			}
-			else if (commandInt == 2)
-			{
-				s = "AttestEnclave";
-			}
-			else if (commandInt == 3)
-			{
-				s = "Quote";
-			}
-			else if (commandInt == 4)
-			{
-				s = "done";
-			}
-
-			
-			strcpy(command, s.c_str());
-
-			printf("%s\n", command);
-
-			vector<BYTE> Nonce = CryptoServices::GetRand(16); //gets 16bytes
-			//std::vector<BYTE> Nonce = tpm.GetRandom(20);
-
-			cout << Nonce.size() << endl;
-
-
-			continue;
-
-
-			msgio->mySend(command, NULL);
-
-
-			
-
-
-			if (strcmp(command, "AttestEnclave") == 0)
-			{
-				ra_session_t session;
-				sgx_ra_msg1_t msg1;
-				sgx_ra_msg2_t msg2;
-				ra_msg4_t msg4;
-
-				memset(&session, 0, sizeof(ra_session_t));
-
-				// Read message 0 and 1, then generate message 2
-				if (!process_msg01(msgio, ias, &msg1, &msg2, &sigrl, &config, &session))
-				{
-					eprintf("error processing msg1\n");
-					goto disconnect;
-				}
-
-				// Send message 2
-
-				dividerWithText(stderr, "Copy/Paste Msg2 Below to Client");
-				dividerWithText(fplog, "Msg2 (send to Client)");
-
-				msgio->send_partial((void *)&msg2, sizeof(sgx_ra_msg2_t));
-				fsend_msg_partial(fplog, (void *)&msg2, sizeof(sgx_ra_msg2_t));
-
-				msgio->send(&msg2.sig_rl, msg2.sig_rl_size);
-				fsend_msg(fplog, &msg2.sig_rl, msg2.sig_rl_size);
-
-				edivider();
-
-				// Read message 3, and generate message 4
-
-
-				if (!process_msg3(msgio, ias, &msg1, &msg4, &config, &session))
-				{
-					eprintf("error processing msg3\n");
-					goto disconnect;
-				}
-
-				continue;
-			}
-
-
-
-
-			int rv = msgio->myRead(received, &length);
-
-			for (int i = 0; i < length; i++)
-			{
-				receivedU[i] = received[i];
-			}
-			printf("Received Result -> %s\n", receivedU);
-
-			if (strcmp(receivedU, "result done") == 0)
-			{
-				break;
-			}
-
-
-			*/
-
-
-
-
-			//////////////////////////////////////////////////////
-
-			//char *call = "multiplication";
-			//char *result=NULL;
-
-
-			//makeCall_GetResult(msgio, ias, call, result, &config, &session);
-
-
 		}
-		//////////////////////////////////////////////////////
+		
 	disconnect:
 		msgio->disconnect();
 	}
 
 	crypto_destroy();
 
-	
 	return 0;
 }
 
 
 
 
-
-
-int makeCall_GetResult(MsgIO *msgio, IAS_Connection *ias, char *call, char *result, config_t *config, ra_session_t *session)
-{
-	char sent[512] = { '\0' };
-	printf("<<<<<<<<<<<<<<<<<<NEW>>>>>>>>>>>>>>>>>>>>>\n");
-
-	strcpy(sent, call);
-
-	while (1)
-	{
-		printf("i wont sent\n");
-	}
-
-	printf("%s\n", sent);
-	msgio->mySend(sent, NULL);
-
-
-
-	char* received = (char *)malloc(512);
-	int length = 0;
-	int rv = msgio->myRead(received, &length);
-
-
-	char receivedU[512] = { '\0' };
-	for (int i = 0; i < length; i++)//newline var onun icin yaptim
-	{
-		receivedU[i] = received[i];
-	}
-
-	printf("ResultReceived=%s\n", receivedU);
-
-	//	printf("keyDerivationKey%s\n",session->kdk);
-
-
-	return 0;
-}
 
 
 
@@ -1510,13 +1374,6 @@ int derive_kdk(EVP_PKEY *Gb, unsigned char kdk[16], sgx_ec256_public_t g_a, conf
 
 	return 1;
 }
-
-
-
-
-
-
-
 
 int get_sigrl(IAS_Connection *ias, int version, sgx_epid_group_id_t gid, char **sig_rl, uint32_t *sig_rl_size)
 {

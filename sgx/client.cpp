@@ -279,35 +279,28 @@ void MeasureApp(Tpm2 tpm, int startPCR, int endPCR)
 }
 
 
-void Signing(Tpm2 tpm, TPM_HANDLE keyhandle, char* nonce,  char* smessage)
+void Signing(Tpm2 tpm, TPM_HANDLE keyhandle, char* nonce,  message* smessage)
 {
 	vector<BYTE> NullVec;
 	ByteVec userAuth = ByteVec{ 1, 2, 3, 4 };
 
-	char tobeSigned[10];
-	strcpy(tobeSigned, nonce);
-
-	printf("will be signed:%s\n", tobeSigned);
+	printf("will be signed:%s\n", nonce);
 
 	TPM_HANDLE& signKey = keyhandle;
 	signKey.SetAuth(userAuth);
-	TPMT_HA dataToSign = TPMT_HA::FromHashOfString(TPM_ALG_ID::SHA256, tobeSigned);
+	TPMT_HA dataToSign = TPMT_HA::FromHashOfString(TPM_ALG_ID::SHA256, nonce);
 	auto sig = tpm.Sign(signKey, dataToSign.digest, TPMS_NULL_SIG_SCHEME(), TPMT_TK_HASHCHECK::NullTicket());
 	cout << "Data to be signed:" << dataToSign.digest << endl;
 	cout << "Signature:" << endl << sig.ToString(false) << endl;
 
-	
-
-//	cout << "size=" << sizeof(sig.Serialize(SerializationType::Text)) << endl;
-	
+		
 	string sserialized = sig.Serialize(SerializationType::Text);
-	//printf("size=%d\n", s.size());
-//	printf("length=%d\n", s.length());
 	cout << "sig=" << sserialized << endl;
 
-//	memcpy(smessage, &s, 1000);
-	smessage = (char*) sserialized.c_str();
-
+	for (int ss = 0; ss < sserialized.length(); ss++)
+	{
+		smessage->Rest.push_back(sserialized[ss]);
+	}
 
 	// This command uses loaded keys to validate a signature on a message 
 	// with the message digest passed to the TPM.
@@ -378,10 +371,6 @@ TPM_HANDLE MakeChildSigningKeyForQuote(Tpm2 tpm, TPM_HANDLE parentHandle, bool r
 QuoteResponse GenerateQuote_PCR(Tpm2 tpm, int startPCR, int endPCR, ByteVec Nonce)
 {
 
-//	cout << endl << "Nonce=>" << endl;
-//	for (auto val : Nonce) printf("\\x%.2x", val);
-//	cout << endl;
-
 	int PCRbank = startPCR;
 
 	vector<BYTE> NullVec;
@@ -439,63 +428,82 @@ int main(int argc, char *argv[])
 	
 	getRandomBytes(tpm);
 	
-	/*
+	
 	TPM_HANDLE *primaryKey = NULL;
 	TPM_HANDLE *signingKey = NULL;
 
+	
 	while (1)
 	{
-		char command[30] = { '\0' };
+		
+		int command=-1;
 		printf("---------------------------\n");
-		printf("\n\nOptions\n");
+		printf("\n\n Options to test TPM functionalities\n");
+		printf("-1 -> Skip testing or done with the testing\t");
 		printf("1 -> Creating EK\t");
 		printf("2 -> Creating AIK\t");
 		printf("3 -> Sign with AIK\n");
 		printf("4 -> MeasureApp\t\t");
-		printf("5 -> GenerateQuote_PCR\t\t");
-		printf("6 -> done\n");
+		printf("5 -> GenerateQuote_PCR\n");
+		
+		int startPCR = 13;
+		int endPCR = 13;
+		vector<BYTE> Nonce;
+		Nonce = CryptoServices::GetRand(10); //gets 10bytes
+		//std::vector<BYTE> Nonce = tpm.GetRandom(20);
 
 		printf("Command:");
-		scanf("%s", command);
+		scanf("%d", &command);
+		if (command==-1)
+		{
+			break;
+		}
 
-		if (strcmp(command, "1") == 0)
+		if (command==1)
 		{
 			primaryKey = &(MakeEndorsementKey(tpm));
-			//	cout << "primary done" << endl;
+			cout << "EK created" << endl;
 		}
-		if (strcmp(command, "2") == 0)
+		if (command==2)
 		{
 			if (primaryKey == NULL) { cout << "Create primary EK first" << endl; }
 			else
 			{
 				signingKey = &(MakeChildSigningKey(*primaryKey, true, tpm));
-				//	cout << "secondary done" << endl;
+				cout << "AIK created" << endl;
 			}
 		}
-		if (strcmp(command, "3") == 0)
+		if (command==3)
 		{
 			if (signingKey == NULL) { cout << "Create primary AIK first" << endl; }
 			else
 			{
-//				Signing(tpm, *signingKey);
+				char* nonce = (char*)malloc(10);
+				message smessage = message();
+				
+				std::copy(Nonce.begin(), Nonce.end(), nonce);
+				cout << endl << "Nonce=>" << endl;
+				for (auto val : Nonce) printf("\\x%.2x", val);
+				cout << endl;
+
+				Signing(tpm, *signingKey, nonce, &smessage);
 				cout << "signing and verification is done" << endl;
+			
+				cout << "sig=>" << endl;
+				for (auto val : smessage.Rest) printf("%c", val);
+				cout << endl;
 			}
 		}
-		if (strcmp(command, "4") == 0)
+		if (command==4)
 		{
-			MeasureApp(tpm);
+			MeasureApp(tpm, startPCR, endPCR);
 		}
-		if (strcmp(command, "5") == 0)
+		if (command==5)
 		{
-			GenerateQuote_PCR(tpm);
-		}
-		if (strcmp(command, "6") == 0)
-		{
-			break;
-		}
+			QuoteResponse quote = GenerateQuote_PCR(tpm, startPCR, endPCR, Nonce);
+		}	
 	}
-	*/
-
+	cout << "Finished TPM functionality checking" << endl;
 
 	//////////////////////////////////////////////////////////////////////////////////////////
 
@@ -825,16 +833,21 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 
 	for (;;)
 	{
-		
 		message rmessage = message();
 		message smessage = message();
 			
 		msgio->ReadStruct(&rmessage);
 		msgio->printMessage(&rmessage, 0);
-		
+	
+		ByteVec NonceExtracted = ByteVec();
+		for (int n = 0; n < 10; n++)
+		{
+			NonceExtracted.push_back(rmessage.Rest[n]);
+			smessage.Rest.push_back(rmessage.Rest[n]);
+		}
+
 		if (rmessage.command == 1)//"Attesting ID"
 		{
-
 			printf("--------------- Attesting ID ---------------\n");
 			/*
 			printf("Checking EK\n");
@@ -858,7 +871,7 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 				cout << "AIK exists with handle:\t" << signingKey->handle << endl;
 			}
 			
-			Signing(tpm, *signingKey, rmessage.Nonce, smessage.result);
+			Signing(tpm, *signingKey, rmessage.Nonce, &smessage);
 //			cout << "sig=" << smessage.result << endl;
 			*/
 		
@@ -867,35 +880,30 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 		//	system("start powershell.exe C:\\Users\\admin\\Desktop\\pscript.ps1");
 		//	system("cls");
 		
-
 			ifstream::pos_type size;
 			char * memblock = NULL;
 
-			ifstream file("./ek.cer", ios::in | ios::binary | ios::ate);
+			ifstream file("./../../../../certificates/clientEK.cer", ios::in | ios::binary | ios::ate);
 
 			if (file.is_open())
-			{				
+			{
 				size = file.tellg();
-				
+
 				memblock = new char[size];
 				file.seekg(0, ios::beg);
 				file.read(memblock, size);
 				file.close();
 			}
-			//printf("%s\n", memblock);
-			cout << "size1=" << (int)size << endl;
-			cout << "size2=" << sizeof(*memblock)<< endl;
 
-
-			for (int i = 0; i < 10; i++)//copyNonce
-			{
-				smessage.Rest.push_back(rmessage.Rest[i]);
-			}
-
-			for (int i = 0; i < size; i++)
+			int certsize = (int)size;
+			//printf("certSize=%d\n", certsize);
+		
+			for (int i = 0; i < certsize; i++)
 			{
 				smessage.Rest.push_back(memblock[i]);
 			}
+
+			//printf("restSize=%d\n", smessage.Rest.size());
 
 			msgio->SendStruct(&smessage);
 			msgio->printMessage(&smessage, 1);
@@ -911,16 +919,6 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 			printf("--------------- Generating Quote (i.e. Attesting Platform And App State) ---------------\n");
 
 			MeasureApp(tpm, rmessage.startPCR, rmessage.endPCR);
-	
-			
-			ByteVec NonceExtracted = ByteVec();
-
-			for (int n = 0; n < 10; n++)
-			{
-				NonceExtracted.push_back(rmessage.Rest[n]);
-				smessage.Rest.push_back(rmessage.Rest[n]);
-			}
-
 
 			QuoteResponse quote=GenerateQuote_PCR(tpm, rmessage.startPCR, rmessage.endPCR, NonceExtracted);
 			
@@ -929,13 +927,11 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 			cout << "Quoted PCR: " << qInfo->pcrSelect[0].ToString() << endl;
 			cout << "PCR-value digest: " << qInfo->pcrDigest << endl;
 
-			
 			string qserialized=quote.Serialize(SerializationType::JSON);
 
 			cout << "quote as JSON=>" << endl;
 			cout << qserialized << endl;
 			printf("quote as JSON length=%d\n", qserialized.length());
-
 
 			//cout << "deserialization:" << endl;
 			//QuoteResponse quoteDeserialized=QuoteResponse();
@@ -957,138 +953,39 @@ int recieveCall_sendResult(sgx_enclave_id_t eid, config_t *config, Tpm2 tpm)
 			cout << "-----------Breaking-----------" << endl;
 			break;
 		}
+		else if (rmessage.command == 5)//multiplication
+		{
+			cout << "-----------Multiplication-----------" << endl;
+		
+			BYTE arrayOfByte1[sizeof(int)];
+			for (int i = 10; i < 10 + sizeof(int); i++)
+			{
+				arrayOfByte1[i - 10] = rmessage.Rest[i];
+			}
+			int numberIn;
+			memcpy(&numberIn, &arrayOfByte1, sizeof(numberIn));	
+
+			printf("number to be squared=%d\n", numberIn);
+
+			int numberOut;//= -1;
+			square(eid, sizeof(int), &numberIn, &numberOut);
+			printf("squared number from enclave=%d\n", numberOut);
+
+			BYTE arrayOfByte[sizeof(int)];
+			memcpy(arrayOfByte, &numberOut, sizeof(numberOut));
+
+			for (int in = 0; in < sizeof(int); in++)
+			{
+				smessage.Rest.push_back(arrayOfByte[in]);
+			}
+
+			msgio->SendStruct(&smessage);
+			msgio->printMessage(&smessage, 1);
+		}
 		else
 		{
 		}
-
-		
-
-
-		
-
-
-		/*
-		
-
-		
-		char* received = (char *)malloc(512);
-		memset(received, 0, sizeof(512));
-
-		char* sent = (char *)malloc(512);
-		memset(sent, 0, 512);
-
-		int length = 0;
-		int rv = msgio->myRead(received, &length);
-
-
-		char receivedU[512] = { '\0' };
-		char sentU[512] = { '\0' };
-		for (int i = 0; i < length; i++)
-		{
-			receivedU[i] = received[i];
-		}
-		/////////////////////////////////////////////////////////////////////////////
-
-		printf("command received: %s\n", receivedU);
-
-		if (strcmp(receivedU, "AttestID") == 0)
-		{
-		
-		}
-		else if (strcmp(receivedU, "AttestEnclave") == 0)
-		{
-			printf("Attesting Enclave\n");
-
-			do_attestation(eid, config, msgio);
-
-			//sent = "result AttestEnclave";
-
-			//strcpy(sentU, sent);
-			//msgio->mySend(sent, NULL);
-			
-			//msgio->send(sent, NULL);
-
-		}
-		else if (strcmp(receivedU, "Quote") == 0)//Quote(i.e. AttestPlatformAndAppState)
-		{
-			printf("--------------- Generating Quote (i.e. Attesting Platform And App State) ---------------\n");
-
-			
-			//MeasureApp(tpm);
-			//GenerateQuote_PCR(tpm);
-
-			sent = "result Quote";
-
-			strcpy(sentU, sent);
-			msgio->mySend(sent, NULL);
-			//msgio->send(sent, NULL);
-		}
-		else if (strcmp(receivedU, "done") == 0)
-		{
-			printf("inside done\n");
-			sent = "result done";
-			strcpy(sentU, sent);
-			msgio->mySend(sent, NULL);
-			//msgio->send(sent, NULL);
-			break;
-		}
-		else
-		{
-			printf("inside else\n");
-			sent = "result of else";
-			strcpy(sentU, sent);
-			//msgio->mySend(sent, NULL);
-			msgio->send(sent, NULL);
-		}
-
-
-		*/
-
-
 	}
-
-
-
-
-
-
-	/*
-
-	printf("<<<<<<<<<<<<<<<<<<NEW>>>>>>>>>>>>>>>>>>>>>\n");
-
-	char* received= (char *) malloc(512);
-	int length = 0;
-	int rv = msgio->myRead(received, &length);
-
-
-	char receivedU[512] = { '\0' };
-	for (int i = 0; i < length; i++)
-	{
-		receivedU[i] = received[i];
-	}
-
-	printf("received=%s\n", receivedU);
-	printf("received=%d bytes\n", length);
-
-	if (strcmp(receivedU, "multiplication") == 0)
-	{
-		int numberIn = 5;
-		int numberOut;//= -1;
-		square(eid, sizeof(int), &numberIn, &numberOut);
-		//printf("squared number from enclave=%d\n", numberOut);
-
-		char sent[512] = { '\0' };
-		char *numberOutString= (char*)malloc(32); //= "resultSent";
-
-		sprintf(numberOutString, "%d", numberOut);
-
-		strcpy(sent, numberOutString);
-
-		printf("ResultSent=%s\n", sent);
-		msgio->mySend(sent, NULL);
-	}
-	*/
-
 
 	/*
 	std::clock_t start;
@@ -1584,7 +1481,6 @@ int do_attestation(sgx_enclave_id_t eid, config_t *config, MsgIO *msgio)
 	enclave_ra_close(eid, &sgxrv, ra_ctx);
 	return 0;
 }
-
 
 int do_quote(sgx_enclave_id_t eid, config_t *config)
 {
